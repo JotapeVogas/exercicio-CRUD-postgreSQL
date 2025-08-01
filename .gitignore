@@ -1,54 +1,23 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# Python cache
+__pycache__
 
 # Environments
 .env
 .venv
-env/
 venv/
-ENV/
-env.bak/
-venv.bak/
+.env.bak
+.venv.bak
 
 # IDE - VS Code
 .vscode/
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
 
-# Byte-compiled / optimized / DLL files
-*.py[cod]
-*$py.class
-*.so
-*.egg
-*.egg-info/
-dist/
+# Outros padrões úteis para Python
+*.pyc
+*.pyo
+*.pyd
+*.py.class
+
+# Diretórios de build/distribuição
 build/
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
+dist/
+*.egg-info/
