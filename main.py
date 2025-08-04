@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, status, Query
+from fastapi import FastAPI, HTTPException, status, Query, Body, Path
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 import psycopg
 from typing import Optional
@@ -19,18 +20,27 @@ DATABASE_CONFIG = {
 }
 
 class Database:
-    def __init__(self):
-        self.connection = None
     
-    def __enter__(self):
-        self.connection = psycopg.connect(
+    def __init__(self):
+        self._conn = psycopg.connect(
             dbname=DATABASE_CONFIG["dbname"],
             user=DATABASE_CONFIG["user"],
             password=DATABASE_CONFIG["password"],
             host=DATABASE_CONFIG["host"],
             port=DATABASE_CONFIG["port"]
         )
-        return self.connection.cursor(row_factory=dict_row)
+        self._cursor = self._conn.cursor(row_factory=dict_row) 
+    
+    def __enter__(self):
+        return self
+
+    @property
+    def connection(self):
+        return self._conn
+
+    @property
+    def cursor(self):
+        return self._cursor
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.connection:
@@ -40,10 +50,25 @@ class Database:
                 self.connection.rollback()
             self.connection.close()
 
+    def execute(self, sql: str, params=None):
+        self._cursor.execute(sql, params or ())
+        return self._cursor
+
+    def queryone(self, sql: str, params=any):
+        self.cursor.execute(query=sql, params=params)
+        return self.cursor.fetchone()
+    
+    def query(self, sql:str, params=any):
+        self.cursor.execute(query=sql, params=params)
+        return self.cursor.fetchall()
+    
+    def commit(self):
+        return self.commit()
+
 class UsuarioModel(BaseModel):
     nome: str
     email: EmailStr
-    ativo: bool
+    ativo: int
 
 class UsuarioCreate(UsuarioModel):
     pass
@@ -69,20 +94,18 @@ class UsuarioCRUD:
     @staticmethod
     def criar(usuario: UsuarioCreate):
         with Database() as cursor:
-            cursor.execute(
+            return cursor.queryone(
                 "INSERT INTO usuarios(nome, email, ativo) VALUES (%s, %s, %s) RETURNING *",
-                (usuario.nome, usuario.email, usuario.ativo)
+                [usuario.nome, usuario.email, usuario.ativo]
             )
-            return cursor.fetchone()
 
     @staticmethod
     def listar_com_filtro(
-        ativo: bool | None = None,
+        ativo: int | None = None,
         nome: str | None = None,
         ordenador: str | None = "id"
     ):
         with Database() as cursor:
-
             colunas_permitidas = ["id", "nome", "email"]
             ordenador = ordenador if ordenador in colunas_permitidas else "id"
             ordem = f"ORDER BY {ordenador} ASC"
@@ -90,7 +113,7 @@ class UsuarioCRUD:
             query = "SELECT * FROM usuarios"
             params = []
             conditions = []
-            if ativo is not None:
+            if ativo is not None and ativo != -1:
                 conditions.append("ativo = %s")
                 params.append(ativo)
             if nome:
@@ -101,22 +124,28 @@ class UsuarioCRUD:
                 query += " WHERE " + " AND ".join(conditions)
             
             query += f" {ordem}"
-            cursor.execute(query, params)
-            return cursor.fetchall()
+            return cursor.query(query, params)
 
     @staticmethod
     def atualizar(usuario_id: int, usuario: UsuarioCreate):
         with Database() as cursor:
-            cursor.execute(
-                "UPDATE usuarios SET nome = %s, email = %s, ativo = %s WHERE id = %s RETURNING *",
-                (usuario.nome, usuario.email, usuario.ativo, usuario_id)
-            )
-            return cursor.fetchone()
+            query = "UPDATE usuarios SET nome = %s, email = %s, ativo = %s WHERE id = %s RETURNING *"
+            params = (usuario.nome, usuario.email, usuario.ativo, usuario_id)
+            return cursor.queryone(query, params)
+    
+    @staticmethod
+    def buscar_por_id(usuario_id: int):
+        with Database() as cursor:
+            query = "SELECT * FROM usuarios WHERE id = %s"
+            params = (usuario_id,)
+            return cursor.query(query, params)
 
     @staticmethod
     def deletar(usuario_id: int):
         with Database() as cursor:
-            cursor.execute("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
+            query = "UPDATE usuarios SET ativo = 0 WHERE id = %s AND ativo = 1"
+            params = (usuario_id,)
+            return cursor.execute(query, params)
 
 UsuarioCRUD.criar_tabela()
 
@@ -124,7 +153,7 @@ UsuarioCRUD.criar_tabela()
          summary="Página inicial",
          description="Redireciona para a documentação interativa da API (Swagger UI).") 
 def home():
-    return {"escreva na URL": "http://127.0.0.1:8000/docs#/"}
+    return {"escreva na URL": "http://127.0.0.1:5000/docs#/"}
 
 @app.post("/usuarios", 
           status_code=status.HTTP_201_CREATED,
@@ -153,7 +182,7 @@ def criar_usuario(usuario: UsuarioCreate):
         404: {"description": "Nenhum usuário encontrado"}
     })
 def listar_usuarios(
-        ativo: Optional[bool] = Query(default=None, description="TRUE: só ativos | FALSE: só inativos | --: ativos e inativos"),
+        ativo: Optional[int] = Query(default=None, description="1: só ativos | 0: só inativos | -1: ativos e inativos"),
         nome: Optional[str] = Query(default=None, description="Filtrar por nome"),
         ordenador: Optional[str] = Query(default=None, description="Ordernar por campos nome, id ou email")
     ):
@@ -168,27 +197,54 @@ def listar_usuarios(
              400: {"description": "Dados inválidos"},
              404: {"description": "Usuário não encontrado"}
          })
-def atualizar_usuario(usuario_id: int, usuario: UsuarioCreate):
-    usuario_atualizado = UsuarioCRUD.atualizar(usuario_id, usuario)
-    if usuario_atualizado:
+def atualizar_usuario(
+    usuario_id: int = Path(..., title="ID do usuário"),
+    usuario: UsuarioCreate = Body(..., title="Dados do usuário para atualização")
+):
+    try:
+        usuario_existente = UsuarioCRUD.buscar_por_id(usuario_id)
+        if not usuario_existente:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuário não encontrado"
+            )
+        
+        usuario_atualizado = UsuarioCRUD.atualizar(usuario_id, usuario)
+        
+        if not usuario_atualizado:   
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Falha ao atualizar usuário no banco de dados"
+            )
+                   
         return usuario_atualizado
-    raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    
-    
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao atualizar usuário: {str(e)}"
+        )
+
 @app.delete("/usuarios/{usuario_id}", 
             status_code=status.HTTP_204_NO_CONTENT,
-            summary="Remover usuário",
-            description="Remove permanentemente um usuário do sistema pelo seu ID.",
+            summary="Desativar usuário",
+            description="Exclui logicamente um usuário do sistema pelo seu ID.",
             responses={
                 204: {"description": "Usuário removido com sucesso"},
-                404: {"description": "Usuário não encontrado"}
+                404: {"description": "Usuário não encontrado"},
+                500: {"description": "Erro interno no servidor"}
             })
-def deletar_usuario(usuario_id: int):
-    if not UsuarioCRUD.buscar_por_id(usuario_id):
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    
+def deletar_usuario(usuario_id: int = Path(..., title="ID do usuário", description="ID do usuário a ser removido")):
+    usuario = UsuarioCRUD.buscar_por_id(usuario_id)
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado ou já inativo"
+        )
     UsuarioCRUD.deletar(usuario_id)
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 if __name__ == "__main__":
     import uvicorn
