@@ -130,21 +130,21 @@ class UsuarioCRUD:
     def atualizar(usuario_id: int, usuario: UsuarioCreate):
         with Database() as cursor:
             query = "UPDATE usuarios SET nome = %s, email = %s, ativo = %s WHERE id = %s RETURNING *"
-            params = (usuario.nome, usuario.email, usuario.ativo, usuario_id)
+            params = [usuario.nome, usuario.email, usuario.ativo, usuario_id]
             return cursor.queryone(query, params)
     
     @staticmethod
     def buscar_por_id(usuario_id: int):
         with Database() as cursor:
             query = "SELECT * FROM usuarios WHERE id = %s"
-            params = (usuario_id,)
+            params = [usuario_id]
             return cursor.query(query, params)
 
     @staticmethod
     def deletar(usuario_id: int):
         with Database() as cursor:
             query = "UPDATE usuarios SET ativo = 0 WHERE id = %s AND ativo = 1"
-            params = (usuario_id,)
+            params = [usuario_id]
             return cursor.execute(query, params)
 
 UsuarioCRUD.criar_tabela()
