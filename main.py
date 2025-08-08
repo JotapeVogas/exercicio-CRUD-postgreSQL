@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Query, Body, Path
+from fastapi import FastAPI, HTTPException, status, Query, Body, Path, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 import psycopg
@@ -87,7 +87,8 @@ class UsuarioCRUD:
                 CREATE TABLE IF NOT EXISTS usuarios (
                    id SERIAL PRIMARY KEY,
                    nome TEXT NOT NULL,
-                   email TEXT NOT NULL
+                   email TEXT NOT NULL,
+                   ativo INTEGER NOT NULL
                 )
             ''')
 
@@ -153,7 +154,7 @@ UsuarioCRUD.criar_tabela()
          summary="Página inicial",
          description="Redireciona para a documentação interativa da API (Swagger UI).") 
 def home():
-    return {"escreva na URL": "http://127.0.0.1:5000/docs#/"}
+    return {"escreva na URL": "http://127.0.0.1:8000/docs#/"}
 
 @app.post("/usuarios", 
           status_code=status.HTTP_201_CREATED,
@@ -163,8 +164,12 @@ def home():
               201: {"description": "Usuário criado com sucesso"},
               400: {"description": "Dados inválidos ou erro no banco de dados"}
           })
-def criar_usuario(usuario: UsuarioCreate):
+def criar_usuario(nome: str = Body(..., embed=True, title="Nome do usuário", description="Nome completo do usuário"),
+                  email: EmailStr = Body(..., embed=True,  title="Email do usuário", description="Email do usuário"),
+                  ativo: int = Body(..., default=1, embed=True,  title="Status do usuário", description="1: Ativo | 0: Inativo")
+                ):
     try:
+        usuario = UsuarioCreate(nome=nome, email=email, ativo=ativo)
         novo_usuario = UsuarioCRUD.criar(usuario)
         return novo_usuario
     except psycopg.Error as e:
